@@ -19,9 +19,9 @@ const TERRAIN_ROWS = [
   "WWLLLLLLWWLWW",
   "WWWLLLWWWWWWW",
   "LWWWWWWWWWWWL",
-  "LLWWLLLLLLWLL",
   "LLWLLLLLLLWLL",
-  "LLWWLLLLLLWLL",
+  "LLWLLLLLLWWLL",
+  "LLWWWLLLLLWLL",
   "LWWWWWWWWWWWL",
   "WWWWWWWLLLWWW",
   "WWLWWLLLLLLWW",
@@ -41,22 +41,22 @@ const CARDINAL_DIRECTIONS = [
 ] as const;
 
 const PLAYER_LABELS = {
-  left: "Top Fleet",
-  right: "Bottom Fleet",
+  marauders: "Marauders",
+  vikings: "Vikings",
 } as const;
 
 const PLAYER_COLORS = {
-  left: "#8f2d18",
-  right: "#284b63",
+  marauders: "#8f2d18",
+  vikings: "#284b63",
 } as const;
 
 const PLAYER_SURFACES = {
-  left: "rgba(143, 45, 24, 0.14)",
-  right: "rgba(40, 75, 99, 0.14)",
+  marauders: "rgba(143, 45, 24, 0.14)",
+  vikings: "rgba(40, 75, 99, 0.14)",
 } as const;
 
 type Terrain = "land" | "water";
-type Player = "left" | "right";
+type Player = "marauders" | "vikings";
 type PieceKind = "hunter" | "chief" | "dragon" | "traitor";
 type ShipKind = "longship" | "chiefship";
 
@@ -113,7 +113,7 @@ const isInBounds = (row: number, col: number) =>
 const toPositionKey = (position: Position) => `${position.row}:${position.col}`;
 
 const otherPlayer = (player: Player): Player =>
-  player === "left" ? "right" : "left";
+  player === "marauders" ? "vikings" : "marauders";
 
 const isAdjacent = (first: Position, second: Position) =>
   Math.max(
@@ -230,31 +230,31 @@ const getShipLabel = (ship: Ship) =>
   `${PLAYER_LABELS[ship.owner]} ${getShipRoleLabel(ship)}`;
 
 const createInitialPieces = (): Piece[] => {
-  const leftHunters = HUNTER_COLUMNS.map((col) => ({
-    id: `left-hunter-${col}`,
+  const marauderHunters = HUNTER_COLUMNS.map((col) => ({
+    id: `marauders-hunter-${col}`,
     kind: "hunter" as const,
-    owner: "left" as const,
+    owner: "marauders" as const,
     position: { row: 0, col },
     carriesMace: false,
   }));
 
-  const rightHunters = HUNTER_COLUMNS.map((col) => ({
-    id: `right-hunter-${col}`,
+  const vikingHunters = HUNTER_COLUMNS.map((col) => ({
+    id: `vikings-hunter-${col}`,
     kind: "hunter" as const,
-    owner: "right" as const,
+    owner: "vikings" as const,
     position: { row: 12, col },
     carriesMace: false,
   }));
 
   return [
     {
-      id: "left-chief",
+      id: "marauders-chief",
       kind: "chief",
-      owner: "left",
+      owner: "marauders",
       position: { row: 0, col: 6 },
       carriesMace: false,
     },
-    ...leftHunters,
+    ...marauderHunters,
     {
       id: "dragon",
       kind: "dragon",
@@ -263,13 +263,13 @@ const createInitialPieces = (): Piece[] => {
       carriesMace: false,
     },
     {
-      id: "right-chief",
+      id: "vikings-chief",
       kind: "chief",
-      owner: "right",
+      owner: "vikings",
       position: { row: 12, col: 6 },
       carriesMace: false,
     },
-    ...rightHunters,
+    ...vikingHunters,
   ];
 };
 
@@ -277,41 +277,41 @@ const createInitialGameState = (): GameState => ({
   pieces: createInitialPieces(),
   ships: [
     {
-      id: "left-longship",
+      id: "marauders-longship",
       kind: "longship",
-      owner: "left",
+      owner: "marauders",
       position: { row: 2, col: 9 },
     },
     {
-      id: "left-chiefship",
+      id: "marauders-chiefship",
       kind: "chiefship",
-      owner: "left",
+      owner: "marauders",
       position: { row: 2, col: 8 },
     },
     {
-      id: "right-longship",
+      id: "vikings-longship",
       kind: "longship",
-      owner: "right",
+      owner: "vikings",
       position: { row: 10, col: 3 },
     },
     {
-      id: "right-chiefship",
+      id: "vikings-chiefship",
       kind: "chiefship",
-      owner: "right",
+      owner: "vikings",
       position: { row: 10, col: 4 },
     },
   ],
   maces: [
-    { id: "left-mace", position: { row: 1, col: 6 }, carriedBy: null },
-    { id: "right-mace", position: { row: 11, col: 6 }, carriedBy: null },
+    { id: "marauders-mace", position: { row: 1, col: 6 }, carriedBy: null },
+    { id: "vikings-mace", position: { row: 11, col: 6 }, carriedBy: null },
   ],
-  currentTurn: "left",
+  currentTurn: "vikings",
   dragonController: null,
   traitorTokenPosition: { row: 6, col: 12 },
   traitorClaimedBy: null,
-  traitorAbilityUsed: { left: false, right: false },
+  traitorAbilityUsed: { marauders: false, vikings: false },
   winner: null,
-  status: "Top Fleet to move.",
+  status: "Vikings to move.",
 });
 const getHunterStyleMoves = (piece: Piece, state: GameState): Position[] => {
   const validMoves: Position[] = [];
@@ -388,6 +388,25 @@ const getChiefMoves = (piece: Piece, state: GameState): Position[] => {
   });
 };
 
+const hasAdjacentAlliedPiece = (state: GameState, piece: Piece) =>
+  CARDINAL_DIRECTIONS.some((direction) => {
+    const neighbor = {
+      row: piece.position.row + direction.row,
+      col: piece.position.col + direction.col,
+    };
+
+    if (!isInBounds(neighbor.row, neighbor.col)) {
+      return false;
+    }
+
+    const neighborPiece = getPieceAt(state, neighbor);
+    return Boolean(
+      neighborPiece &&
+        neighborPiece.id !== piece.id &&
+        getPieceController(neighborPiece, state) === piece.owner
+    );
+  });
+
 const getDragonMoves = (piece: Piece, state: GameState): Position[] => {
   const controller = state.dragonController;
 
@@ -419,12 +438,21 @@ const getDragonMoves = (piece: Piece, state: GameState): Position[] => {
         continue;
       }
 
+      const targetOwner = getPieceController(targetPiece, state);
+
+      if (targetOwner === controller) {
+        continue;
+      }
+
       if (
         targetPiece.kind === "hunter" &&
-        targetPiece.owner === otherPlayer(controller)
+        targetPiece.owner === otherPlayer(controller) &&
+        !hasAdjacentAlliedPiece(state, targetPiece)
       ) {
         validMoves.push(target);
       }
+
+      break;
     }
   }
 
@@ -523,7 +551,7 @@ const capturePieces = (state: GameState, pieceIds: string[]): GameState => {
 const applySandwichCaptures = (state: GameState) => {
   const capturedIds = new Set<string>();
 
-  for (const owner of ["left", "right"] as const) {
+  for (const owner of ["marauders", "vikings"] as const) {
     for (let row = 0; row < BOARD_SIZE; row += 1) {
       for (let col = 0; col < BOARD_SIZE; col += 1) {
         const start = { row, col };
@@ -570,6 +598,52 @@ const applySandwichCaptures = (state: GameState) => {
 
             break;
           }
+        }
+      }
+    }
+
+    const chiefs = state.pieces.filter(
+      (piece) => piece.kind === "chief" && piece.owner === owner
+    );
+
+    for (const chief of chiefs) {
+      for (const direction of CARDINAL_DIRECTIONS) {
+        const target = {
+          row: chief.position.row + direction.row,
+          col: chief.position.col + direction.col,
+        };
+
+        if (!isInBounds(target.row, target.col)) {
+          continue;
+        }
+
+        const targetPiece = getPieceAt(state, target);
+
+        if (
+          !targetPiece ||
+          !canBeSandwichCaptured(targetPiece) ||
+          getPieceController(targetPiece, state) !== otherPlayer(owner)
+        ) {
+          continue;
+        }
+
+        const supportCount = CARDINAL_DIRECTIONS.reduce((count, offset) => {
+          const neighbor = {
+            row: target.row + offset.row,
+            col: target.col + offset.col,
+          };
+
+          if (!isInBounds(neighbor.row, neighbor.col)) {
+            return count;
+          }
+
+          return (
+            count + (getOccupierOwnerAt(state, neighbor) === owner ? 1 : 0)
+          );
+        }, 0);
+
+        if (supportCount >= 3) {
+          capturedIds.add(targetPiece.id);
         }
       }
     }
@@ -763,16 +837,25 @@ const resolvePieceMove = (
       nextState.pieces.find((piece) => piece.id === pieceId) ?? updatedPiece;
   }
 
-  const victoryText = checkMaceVictory(nextState, updatedPiece, actingOwner);
+  if (updatedPiece.kind === "dragon") {
+    const enemyChief = getChief(nextState, otherPlayer(actingOwner));
 
-  if (victoryText) {
-    return {
-      ...nextState,
-      winner: actingOwner,
-      status: victoryText,
-    };
+    if (enemyChief && isAdjacent(updatedPiece.position, enemyChief.position)) {
+      nextState = {
+        ...nextState,
+        dragonController: otherPlayer(actingOwner),
+      };
+      notes.push(
+        `The Dragon shifted its loyalty to ${
+          PLAYER_LABELS[otherPlayer(actingOwner)]
+        }.`
+      );
+      updatedPiece =
+        nextState.pieces.find((piece) => piece.id === pieceId) ?? updatedPiece;
+    }
   }
 
+  const movedPieceLabel = getPieceLabel(updatedPiece, nextState);
   const captureResult = applySandwichCaptures(nextState);
   nextState = captureResult.state;
 
@@ -784,12 +867,26 @@ const resolvePieceMove = (
     );
   }
 
+  updatedPiece = nextState.pieces.find((piece) => piece.id === pieceId);
+
+  if (updatedPiece) {
+    const victoryText = checkMaceVictory(nextState, updatedPiece, actingOwner);
+
+    if (victoryText) {
+      return {
+        ...nextState,
+        winner: actingOwner,
+        status: victoryText,
+      };
+    }
+  }
+
   return {
     ...nextState,
     currentTurn: otherPlayer(actingOwner),
-    status: `${getPieceLabel(updatedPiece, nextState)} moved to ${formatSquare(
-      target
-    )}.${notes.length > 0 ? ` ${notes.join(" ")}` : ""}`,
+    status: `${movedPieceLabel} moved to ${formatSquare(target)}.${
+      notes.length > 0 ? ` ${notes.join(" ")}` : ""
+    }`,
   };
 };
 
@@ -1021,8 +1118,8 @@ function App() {
     };
   };
 
-  const leftStats = playerStats("left");
-  const rightStats = playerStats("right");
+  const marauderStats = playerStats("marauders");
+  const vikingStats = playerStats("vikings");
 
   const handleReset = () => {
     setGameState(createInitialGameState());
@@ -1550,24 +1647,28 @@ function App() {
               letterSpacing="0.18em"
               color="#705633"
             >
-              Top Fleet
+              Marauders
             </Text>
-            <Text fontSize="2xl" fontWeight="800" color={PLAYER_COLORS.left}>
-              Hunters: {leftStats.hunters}
+            <Text
+              fontSize="2xl"
+              fontWeight="800"
+              color={PLAYER_COLORS.marauders}
+            >
+              Hunters: {marauderStats.hunters}
             </Text>
             <Text fontSize="sm" color="var(--ink-soft)">
-              Mace bearers: {leftStats.maceBearers}
+              Mace bearers: {marauderStats.maceBearers}
             </Text>
             <Text fontSize="sm" color="var(--ink-soft)">
               Dragon control:{" "}
-              {gameState.dragonController === "left" ? "Yes" : "No"}
+              {gameState.dragonController === "marauders" ? "Yes" : "No"}
             </Text>
             <Text fontSize="sm" color="var(--ink-soft)">
               Traitor:{" "}
-              {leftStats.hasTraitorPiece
+              {marauderStats.hasTraitorPiece
                 ? "On the board"
-                : gameState.traitorClaimedBy === "left"
-                ? gameState.traitorAbilityUsed.left
+                : gameState.traitorClaimedBy === "marauders"
+                ? gameState.traitorAbilityUsed.marauders
                   ? "Claimed and spent"
                   : "Claimed and ready"
                 : "Unclaimed"}
@@ -1634,24 +1735,24 @@ function App() {
               letterSpacing="0.18em"
               color="#705633"
             >
-              Bottom Fleet
+              Vikings
             </Text>
-            <Text fontSize="2xl" fontWeight="800" color={PLAYER_COLORS.right}>
-              Hunters: {rightStats.hunters}
+            <Text fontSize="2xl" fontWeight="800" color={PLAYER_COLORS.vikings}>
+              Hunters: {vikingStats.hunters}
             </Text>
             <Text fontSize="sm" color="var(--ink-soft)">
-              Mace bearers: {rightStats.maceBearers}
+              Mace bearers: {vikingStats.maceBearers}
             </Text>
             <Text fontSize="sm" color="var(--ink-soft)">
               Dragon control:{" "}
-              {gameState.dragonController === "right" ? "Yes" : "No"}
+              {gameState.dragonController === "vikings" ? "Yes" : "No"}
             </Text>
             <Text fontSize="sm" color="var(--ink-soft)">
               Traitor:{" "}
-              {rightStats.hasTraitorPiece
+              {vikingStats.hasTraitorPiece
                 ? "On the board"
-                : gameState.traitorClaimedBy === "right"
-                ? gameState.traitorAbilityUsed.right
+                : gameState.traitorClaimedBy === "vikings"
+                ? gameState.traitorAbilityUsed.vikings
                   ? "Claimed and spent"
                   : "Claimed and ready"
                 : "Unclaimed"}
