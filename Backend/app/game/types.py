@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Literal, TypedDict
 
@@ -39,6 +39,14 @@ class PlayerFlags(TypedDict):
     vikings: bool
 
 
+class ActionRecord(TypedDict):
+    player: Player
+    type: Literal["move_piece", "move_ship", "use_traitor"]
+    subjectId: str
+    fromPosition: Position | None
+    toPosition: Position | None
+
+
 class GameState(TypedDict):
     pieces: list[Piece]
     ships: list[Ship]
@@ -48,5 +56,6 @@ class GameState(TypedDict):
     traitorTokenPosition: Position | None
     traitorClaimedBy: Player | None
     traitorAbilityUsed: PlayerFlags
+    recentActions: list[ActionRecord]
     winner: Player | None
     status: str

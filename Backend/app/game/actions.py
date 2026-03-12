@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from .constants import BOARD_SIZE, PLAYER_LABELS
 from .selectors import (
@@ -13,7 +13,7 @@ from .selectors import (
     get_ship_label,
     get_ship_role_label,
 )
-from .types import GameState, Piece, Player, Position, Ship
+from .types import ActionRecord, GameState, Piece, Player, Position, Ship
 from .utils import format_square, is_adjacent, is_in_bounds, other_player
 
 
@@ -48,6 +48,11 @@ def capture_pieces(state: GameState, piece_ids: list[str]) -> GameState:
         "pieces": [piece for piece in state["pieces"] if piece["id"] not in removed_ids],
         "maces": next_maces,
     }
+
+
+def append_recent_action(state: GameState, action: ActionRecord) -> GameState:
+    recent_actions = [*state["recentActions"], action]
+    return {**state, "recentActions": recent_actions[-6:]}
 
 
 def has_l_shape_capture_support(state: GameState, position: Position, owner: Player) -> bool:
@@ -257,6 +262,10 @@ def resolve_piece_move(state: GameState, piece_id: str, target: Position) -> Gam
     if not acting_owner:
         return state
 
+    origin = {
+        "row": moving_piece["position"]["row"],
+        "col": moving_piece["position"]["col"],
+    }
     next_state = state
     notes: list[str] = []
 
@@ -333,6 +342,14 @@ def resolve_piece_move(state: GameState, piece_id: str, target: Position) -> Gam
         )
 
     updated_piece = next((piece for piece in next_state["pieces"] if piece["id"] == piece_id), None)
+    action_record: ActionRecord = {
+        "player": acting_owner,
+        "type": "move_piece",
+        "subjectId": piece_id,
+        "fromPosition": origin,
+        "toPosition": {"row": target["row"], "col": target["col"]},
+    }
+    next_state = append_recent_action(next_state, action_record)
 
     if updated_piece:
         victory_text = check_mace_victory(next_state, updated_piece, acting_owner)
@@ -358,6 +375,7 @@ def resolve_ship_move(state: GameState, ship_id: str, target: Position) -> GameS
     if not ship:
         return state
 
+    origin = {"row": ship["position"]["row"], "col": ship["position"]["col"]}
     next_state: GameState = {
         **state,
         "ships": [
@@ -373,6 +391,16 @@ def resolve_ship_move(state: GameState, ship_id: str, target: Position) -> GameS
 
     moved_ship = next((candidate for candidate in next_state["ships"] if candidate["id"] == ship_id), None) or ship
     next_state, captured = apply_sandwich_captures(next_state)
+    next_state = append_recent_action(
+        next_state,
+        {
+            "player": ship["owner"],
+            "type": "move_ship",
+            "subjectId": ship_id,
+            "fromPosition": origin,
+            "toPosition": {"row": target["row"], "col": target["col"]},
+        },
+    )
 
     return {
         **next_state,
@@ -439,6 +467,22 @@ def resolve_traitor_ability(state: GameState, target_hunter_id: str) -> GameStat
     }
 
     next_state, captured = apply_sandwich_captures(next_state)
+    next_state = append_recent_action(
+        next_state,
+        {
+            "player": acting_owner,
+            "type": "use_traitor",
+            "subjectId": "traitor-piece",
+            "fromPosition": {
+                "row": target_hunter["position"]["row"],
+                "col": target_hunter["position"]["col"],
+            },
+            "toPosition": {
+                "row": target_hunter["position"]["row"],
+                "col": target_hunter["position"]["col"],
+            },
+        },
+    )
 
     return {
         **next_state,

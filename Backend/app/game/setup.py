@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from .constants import HUNTER_COLUMNS
 from .types import GameState, Piece
@@ -99,6 +99,7 @@ def create_initial_game_state() -> GameState:
         "traitorTokenPosition": {"row": 6, "col": 12},
         "traitorClaimedBy": None,
         "traitorAbilityUsed": {"marauders": False, "vikings": False},
+        "recentActions": [],
         "winner": None,
         "status": "Vikings to move.",
     }
