@@ -1,8 +1,15 @@
-﻿import type { GameState, Player } from "./game/types.ts";
+import type { GameState, Player } from "./game/types.ts";
+
+export type BotDifficulty = "easy" | "medium" | "hard";
 
 export type SeatPresence = {
   claimed: boolean;
   connected: boolean;
+};
+
+export type BotMatchSnapshot = {
+  seat: Player;
+  difficulty: BotDifficulty;
 };
 
 export type RoomSnapshot = {
@@ -11,6 +18,7 @@ export type RoomSnapshot = {
   seats: Record<Player, SeatPresence>;
   started: boolean;
   playerCount: number;
+  bot: BotMatchSnapshot | null;
 };
 
 export type RoomSessionResponse = {
@@ -125,6 +133,24 @@ export const createRoom = async (): Promise<RoomSessionResponse> => {
     headers: {
       "Content-Type": "application/json",
     },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  return (await response.json()) as RoomSessionResponse;
+};
+
+export const createBotRoom = async (
+  difficulty: BotDifficulty
+): Promise<RoomSessionResponse> => {
+  const response = await fetch(`${apiBaseUrl}/api/bot-rooms`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ difficulty }),
   });
 
   if (!response.ok) {

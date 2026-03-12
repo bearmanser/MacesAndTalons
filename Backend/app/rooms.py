@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import copy
@@ -18,9 +18,10 @@ from .game import (
     resolve_ship_move,
     resolve_traitor_ability,
 )
+from .game.bot import BotDifficulty, apply_bot_action, choose_bot_action
 from .game.constants import PLAYER_LABELS
 from .game.types import GameState, Player, Position
-from .game.utils import positions_match
+from .game.utils import other_player, positions_match
 from .tokens import TokenError, create_seat_token, verify_seat_token
 
 SEATS: tuple[Player, Player] = ("vikings", "marauders")
@@ -42,6 +43,12 @@ class ActionRejectedError(RoomError):
     pass
 
 
+@dataclass(frozen=True)
+class RoomBot:
+    seat: Player
+    difficulty: BotDifficulty
+
+
 @dataclass
 class Room:
     room_id: str
@@ -49,6 +56,7 @@ class Room:
     claimed_seats: dict[Player, bool]
     sockets: dict[Player, WebSocket | None]
     started: bool = False
+    bot: RoomBot | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -72,6 +80,26 @@ class RoomManager:
 
         seat: Player = "vikings"
         return self._snapshot_room(room), seat, create_seat_token(room_id, seat)
+
+    async def create_bot_room(self, difficulty: BotDifficulty) -> tuple[dict[str, object], Player, str]:
+        async with self.rooms_lock:
+            room_id = self._generate_room_id()
+            human_seat: Player = "vikings"
+            bot_seat: Player = "marauders"
+            room = Room(
+                room_id=room_id,
+                game_state=create_initial_game_state(),
+                claimed_seats={seat: True for seat in SEATS},
+                sockets={seat: None for seat in SEATS},
+                started=True,
+                bot=RoomBot(seat=bot_seat, difficulty=difficulty),
+            )
+            room.game_state["status"] = (
+                f"{PLAYER_LABELS[room.game_state['currentTurn']]} to move against the {difficulty} bot."
+            )
+            self.rooms[room_id] = room
+
+        return self._snapshot_room(room), human_seat, create_seat_token(room_id, human_seat)
 
     async def join_room(self, room_id: str) -> tuple[dict[str, object], Player, str]:
         room = await self.get_room(room_id)
@@ -197,6 +225,32 @@ class RoomManager:
 
         return snapshot
 
+    async def maybe_run_bot_turn(self, room_id: str) -> bool:
+        room = await self.get_room(room_id)
+
+        async with room.lock:
+            if (
+                room.bot is None
+                or not room.started
+                or room.game_state["winner"]
+                or room.game_state["currentTurn"] != room.bot.seat
+            ):
+                return False
+
+            action = choose_bot_action(room.game_state, room.bot.seat, room.bot.difficulty)
+
+            if action is None:
+                winner = other_player(room.bot.seat)
+                room.game_state = {
+                    **room.game_state,
+                    "winner": winner,
+                    "status": f"{PLAYER_LABELS[winner]} win because the {room.bot.difficulty} bot has no legal move.",
+                }
+            else:
+                room.game_state = apply_bot_action(room.game_state, action)
+
+            return True
+
     def _apply_piece_move(
         self, state: GameState, seat: Player, piece_id: str, target_value: object
     ) -> GameState:
@@ -247,11 +301,7 @@ class RoomManager:
 
         target = next((piece for piece in state["pieces"] if piece["id"] == target_hunter_id), None)
 
-        if (
-            not target
-            or target["kind"] != "hunter"
-            or target["owner"] == seat
-        ):
+        if not target or target["kind"] != "hunter" or target["owner"] == seat:
             raise ActionRejectedError("Choose an enemy Hunter for the Traitor.")
 
         return resolve_traitor_ability(state, target_hunter_id)
@@ -281,6 +331,14 @@ class RoomManager:
             },
             "started": room.started,
             "playerCount": sum(1 for claimed in room.claimed_seats.values() if claimed),
+            "bot": (
+                {
+                    "seat": room.bot.seat,
+                    "difficulty": room.bot.difficulty,
+                }
+                if room.bot
+                else None
+            ),
         }
 
     def _generate_room_id(self) -> str:

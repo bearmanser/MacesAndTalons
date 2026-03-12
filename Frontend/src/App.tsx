@@ -1,4 +1,4 @@
-﻿import {
+import {
   Box,
   Button,
   Heading,
@@ -7,7 +7,7 @@
   Text,
   VStack,
 } from "@chakra-ui/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BoardNotesCard } from "./components/BoardNotesCard.tsx";
 import { GameBoard } from "./components/GameBoard.tsx";
 import { PlayerSummaryCard } from "./components/PlayerSummaryCard.tsx";
@@ -37,6 +37,7 @@ import { formatSquare, otherPlayer, toPositionKey } from "./game/utils.ts";
 import {
   buildJoinUrl,
   clearSeatToken,
+  createBotRoom,
   createRoom,
   getRoomWebSocketUrl,
   getStoredSeatToken,
@@ -44,12 +45,13 @@ import {
   readRoomIdFromUrl,
   storeSeatToken,
   writeRoomIdToUrl,
+  type BotDifficulty,
   type ClientMessage,
   type RoomSnapshot,
   type ServerMessage,
 } from "./multiplayer.ts";
 
-type AppMode = "solo" | "multiplayer";
+type AppMode = "solo" | "bot" | "multiplayer";
 type ConnectionState =
   | "idle"
   | "creating"
@@ -58,6 +60,54 @@ type ConnectionState =
   | "connected"
   | "reconnecting"
   | "error";
+
+const BOT_DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+};
+
+const BOT_DIFFICULTY_OPTIONS: Array<{
+  value: BotDifficulty;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "easy",
+    label: "Easy",
+    description: "Shallow lookahead with more variety. Good for learning the rules and openings.",
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Shallow minimax with tighter move selection, so it feels steadier than easy without long waits.",
+  },
+  {
+    value: "hard",
+    label: "Hard",
+    description: "Two-ply minimax that looks ahead to your reply and plays much more deliberately.",
+  },
+];
+
+const isOnlineMode = (mode: AppMode) => mode !== "solo";
+
+const describeSeatStatus = (room: RoomSnapshot | null, player: Player) => {
+  if (!room) {
+    return "open";
+  }
+
+  if (room.bot?.seat === player) {
+    return `${BOT_DIFFICULTY_LABELS[room.bot.difficulty]} bot`;
+  }
+
+  const seat = room.seats[player];
+
+  if (!seat.claimed) {
+    return "open";
+  }
+
+  return seat.connected ? "claimed and connected" : "claimed";
+};
 
 const getSelectionHint = ({
   gameState,
@@ -142,6 +192,7 @@ function App() {
   const [mode, setMode] = useState<AppMode>(() =>
     readRoomIdFromUrl() ? "multiplayer" : "solo"
   );
+  const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>("medium");
   const [soloGameState, setSoloGameState] = useState<GameState>(() =>
     createInitialGameState()
   );
@@ -169,6 +220,12 @@ function App() {
   const reconnectTimerRef = useRef<number | null>(null);
   const authenticatedRef = useRef(false);
   const reconnectAllowedRef = useRef(true);
+
+  const roomBot = multiplayerRoom?.bot ?? null;
+  const activeBotDifficulty = roomBot?.difficulty ?? botDifficulty;
+  const botDifficultyDescription =
+    BOT_DIFFICULTY_OPTIONS.find((option) => option.value === activeBotDifficulty)
+      ?.description ?? "";
 
   const gameState = mode === "solo" ? soloGameState : multiplayerRoom?.gameState ?? null;
 
@@ -264,14 +321,20 @@ function App() {
 
   const selectionHint = useMemo(() => {
     if (!gameState) {
+      if (mode === "bot") {
+        return "Choose a difficulty and start a backend minimax match. You play Vikings and the bot controls Marauders.";
+      }
+
       return roomId
         ? "Open the room, claim a seat, and the board will sync from the backend."
-        : "Choose solo for hotseat play or create a multiplayer room to invite someone else.";
+        : "Choose solo for hotseat play, challenge the bot, or create a multiplayer room.";
     }
 
-    if (mode === "multiplayer") {
+    if (mode !== "solo") {
       if (!multiplayerRoom?.started) {
-        return "The match stays locked until both seats are filled.";
+        return mode === "bot"
+          ? "The bot room will unlock as soon as the backend connection is ready."
+          : "The match stays locked until both seats are filled.";
       }
 
       if (connectionState !== "connected") {
@@ -279,6 +342,10 @@ function App() {
       }
 
       if (multiplayerSeat && multiplayerSeat !== gameState.currentTurn && !gameState.winner) {
+        if (mode === "bot") {
+          return `The ${BOT_DIFFICULTY_LABELS[activeBotDifficulty].toLowerCase()} bot is choosing a move.`;
+        }
+
         return `Waiting for ${PLAYER_LABELS[gameState.currentTurn]} to move.`;
       }
     }
@@ -291,6 +358,7 @@ function App() {
       traitorAvailable,
     });
   }, [
+    activeBotDifficulty,
     connectionState,
     gameState,
     mode,
@@ -306,7 +374,30 @@ function App() {
   const dragonPiece = gameState?.pieces.find((piece) => piece.kind === "dragon") ?? null;
   const marauderStats = gameState ? getPlayerStats(gameState, "marauders") : null;
   const vikingStats = gameState ? getPlayerStats(gameState, "vikings") : null;
-  const joinLink = roomId ? buildJoinUrl(roomId) : null;
+  const joinLink = roomId && !roomBot ? buildJoinUrl(roomId) : null;
+
+  const syncRoomSnapshot = (room: RoomSnapshot) => {
+    setMultiplayerRoom(room);
+    setMode((current) => (current === "solo" ? current : room.bot ? "bot" : "multiplayer"));
+
+    if (room.bot) {
+      setBotDifficulty(room.bot.difficulty);
+    }
+  };
+
+  const clearNetworkSession = () => {
+    if (roomId) {
+      clearSeatToken(roomId);
+    }
+
+    writeRoomIdToUrl(null);
+    setRoomId(null);
+    setSeatToken(null);
+    setMultiplayerRoom(null);
+    setMultiplayerSeat(null);
+    setConnectionState("idle");
+    setMultiplayerError(null);
+  };
 
   useEffect(() => {
     if (!gameState) {
@@ -336,7 +427,7 @@ function App() {
   }, [canInteract, gameState, selection]);
 
   useEffect(() => {
-    if (mode !== "multiplayer" || !roomId || !seatToken) {
+    if (!isOnlineMode(mode) || !roomId || !seatToken) {
       authenticatedRef.current = false;
       reconnectAllowedRef.current = false;
 
@@ -379,7 +470,7 @@ function App() {
 
         if (message.type === "auth_ok") {
           authenticatedRef.current = true;
-          setMultiplayerRoom(message.room);
+          syncRoomSnapshot(message.room);
           setMultiplayerSeat(message.seat);
           setConnectionState("connected");
           setMultiplayerError(null);
@@ -387,7 +478,7 @@ function App() {
         }
 
         if (message.type === "room_state") {
-          setMultiplayerRoom(message.room);
+          syncRoomSnapshot(message.room);
 
           if (authenticatedRef.current) {
             setConnectionState("connected");
@@ -462,6 +553,10 @@ function App() {
     setSelection(null);
   };
 
+  const handleBotDifficultyChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    setBotDifficulty(event.target.value as BotDifficulty);
+  };
+
   const handleCopyJoinLink = async () => {
     if (!joinLink || !navigator.clipboard) {
       return;
@@ -476,31 +571,34 @@ function App() {
   };
 
   const handleSwitchToSolo = () => {
-    writeRoomIdToUrl(null);
+    clearNetworkSession();
     setMode("solo");
-    setRoomId(null);
-    setSeatToken(null);
-    setMultiplayerRoom(null);
-    setMultiplayerSeat(null);
-    setConnectionState("idle");
-    setMultiplayerError(null);
     setSelection(null);
   };
 
   const handleSwitchToMultiplayer = () => {
+    if (mode !== "multiplayer" || roomBot) {
+      clearNetworkSession();
+    }
+
     setMode("multiplayer");
     setSelection(null);
+  };
 
-    if (!roomId) {
-      setMultiplayerRoom(null);
-      setMultiplayerSeat(null);
-      setSeatToken(null);
-      setConnectionState("idle");
-      setMultiplayerError(null);
+  const handleSwitchToBot = () => {
+    if (mode !== "bot" || !roomBot) {
+      clearNetworkSession();
     }
+
+    setMode("bot");
+    setSelection(null);
   };
 
   const handleCreateRoom = async () => {
+    if (roomId) {
+      clearSeatToken(roomId);
+    }
+
     setMode("multiplayer");
     setConnectionState("creating");
     setMultiplayerError(null);
@@ -521,6 +619,35 @@ function App() {
       setConnectionState("error");
       setMultiplayerError(
         error instanceof Error ? error.message : "Could not create a room."
+      );
+    }
+  };
+
+  const handleCreateBotRoom = async () => {
+    if (roomId) {
+      clearSeatToken(roomId);
+    }
+
+    setMode("bot");
+    setConnectionState("creating");
+    setMultiplayerError(null);
+
+    try {
+      const session = await createBotRoom(botDifficulty);
+      const nextRoomId = session.room.roomId;
+
+      storeSeatToken(nextRoomId, session.seatToken);
+      writeRoomIdToUrl(nextRoomId);
+      setRoomId(nextRoomId);
+      setSeatToken(session.seatToken);
+      setMultiplayerRoom(session.room);
+      setMultiplayerSeat(session.seat);
+      setConnectionState("connecting");
+      setSelection(null);
+    } catch (error) {
+      setConnectionState("error");
+      setMultiplayerError(
+        error instanceof Error ? error.message : "Could not create a bot match."
       );
     }
   };
@@ -696,10 +823,10 @@ function App() {
                 fontSize={{ base: "sm", md: "md" }}
                 color="var(--ink-soft)"
               >
-                Play the opening as local hotseat or move the trusted game state to
-                the backend and share a join link for a live match. Multiplayer
-                seats reconnect with signed tokens, and the room stays locked until
-                both players are in.
+                Play the opening as local hotseat, challenge a backend minimax bot,
+                or move the trusted game state to the backend and share a join link
+                for a live match. Multiplayer seats reconnect with signed tokens,
+                and bot matches run through the same room flow.
               </Text>
             </VStack>
 
@@ -722,11 +849,15 @@ function App() {
                 letterSpacing="0.18em"
                 color="#705633"
               >
-                {mode === "solo" ? "Mode" : "Room"}
+                {mode === "solo" ? "Mode" : mode === "bot" ? "Opponent" : "Room"}
               </Text>
               <Text fontSize="xl" fontWeight="800" color="#3f2f21">
                 {mode === "solo"
                   ? "Solo Hotseat"
+                  : mode === "bot"
+                  ? roomBot
+                    ? `${BOT_DIFFICULTY_LABELS[roomBot.difficulty]} Bot Match`
+                    : "Bot Lobby"
                   : roomId
                   ? `Room ${roomId.toUpperCase()}`
                   : "Multiplayer Lobby"}
@@ -736,12 +867,20 @@ function App() {
                   ? gameState.winner
                     ? `${PLAYER_LABELS[gameState.winner]} Won`
                     : PLAYER_LABELS[gameState.currentTurn]
+                  : mode === "bot"
+                  ? "Create a bot match"
                   : "Create or join a room"}
               </Text>
               {mode === "multiplayer" ? (
                 <Text fontSize="sm" color="var(--ink-soft)">
                   {describeConnection(connectionState)}
                   {multiplayerSeat ? ` as ${PLAYER_LABELS[multiplayerSeat]}` : ""}
+                </Text>
+              ) : mode === "bot" ? (
+                <Text fontSize="sm" color="var(--ink-soft)">
+                  {roomBot
+                    ? `${BOT_DIFFICULTY_LABELS[roomBot.difficulty]} minimax bot controls ${PLAYER_LABELS[roomBot.seat]}. ${describeConnection(connectionState)}.`
+                    : "Choose a difficulty and start a backend minimax match."}
                 </Text>
               ) : (
                 <Text fontSize="sm" color="var(--ink-soft)">
@@ -751,7 +890,7 @@ function App() {
             </VStack>
           </HStack>
 
-          <HStack gap={3} flexWrap="wrap">
+          <HStack gap={3} flexWrap="wrap" align="center">
             <Button
               onClick={handleSwitchToSolo}
               bg={mode === "solo" ? "#3f2f21" : "#eedbb3"}
@@ -762,6 +901,15 @@ function App() {
               Play Solo
             </Button>
             <Button
+              onClick={handleSwitchToBot}
+              bg={mode === "bot" ? "#3f2f21" : "#eedbb3"}
+              color={mode === "bot" ? "#f7ecd7" : "#3b2814"}
+              border="1px solid rgba(86, 60, 32, 0.2)"
+              _hover={{ bg: mode === "bot" ? "#2f2217" : "#e8d0a0" }}
+            >
+              Play Bot
+            </Button>
+            <Button
               onClick={handleSwitchToMultiplayer}
               bg={mode === "multiplayer" ? "#3f2f21" : "#eedbb3"}
               color={mode === "multiplayer" ? "#f7ecd7" : "#3b2814"}
@@ -770,6 +918,38 @@ function App() {
             >
               Play Multiplayer
             </Button>
+            {mode === "bot" ? (
+              <select
+                value={botDifficulty}
+                onChange={handleBotDifficultyChange}
+                style={{
+                  background: "rgba(255, 248, 232, 0.92)",
+                  color: "#3b2814",
+                  border: "1px solid rgba(86, 60, 32, 0.2)",
+                  borderRadius: "12px",
+                  padding: "0.5rem 0.75rem",
+                  minWidth: "160px",
+                  fontWeight: 700,
+                  fontFamily: "inherit",
+                }}
+              >
+                {BOT_DIFFICULTY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {mode === "bot" ? (
+              <Button
+                onClick={handleCreateBotRoom}
+                bg="#8f2d18"
+                color="#f8edda"
+                _hover={{ bg: "#742515" }}
+              >
+                {roomId && roomBot ? "New Bot Match" : "Start Bot Match"}
+              </Button>
+            ) : null}
             {mode === "multiplayer" && !roomId ? (
               <Button
                 onClick={handleCreateRoom}
@@ -813,7 +993,52 @@ function App() {
             ) : null}
           </HStack>
 
-          {mode === "multiplayer" ? (
+          {mode === "bot" ? (
+            <Stack direction={{ base: "column", lg: "row" }} gap={4}>
+              <VStack
+                flex={1}
+                align="stretch"
+                gap={2}
+                bg="rgba(255, 248, 232, 0.56)"
+                border="1px solid rgba(86, 60, 32, 0.16)"
+                borderRadius="20px"
+                p={4}
+              >
+                <Text fontSize="xs" textTransform="uppercase" letterSpacing="0.16em" color="#705633">
+                  Bot Flow
+                </Text>
+                <Text fontSize="sm" color="var(--ink-soft)">
+                  {roomBot
+                    ? `You play ${multiplayerSeat ? PLAYER_LABELS[multiplayerSeat] : PLAYER_LABELS.vikings}. The backend controls ${PLAYER_LABELS[roomBot.seat]} and calculates replies with minimax search.`
+                    : "Start a bot room to play Vikings against a backend-controlled Marauders side."}
+                </Text>
+                {roomId && roomBot ? (
+                  <Text fontSize="sm" color="var(--ink-soft)" fontFamily="mono">
+                    Room {roomId.toUpperCase()} stays local to this session for reconnects.
+                  </Text>
+                ) : null}
+              </VStack>
+              <VStack
+                flex={1}
+                align="stretch"
+                gap={2}
+                bg="rgba(255, 248, 232, 0.56)"
+                border="1px solid rgba(86, 60, 32, 0.16)"
+                borderRadius="20px"
+                p={4}
+              >
+                <Text fontSize="xs" textTransform="uppercase" letterSpacing="0.16em" color="#705633">
+                  Difficulty
+                </Text>
+                <Text fontSize="sm" color="var(--ink-soft)">
+                  {BOT_DIFFICULTY_LABELS[activeBotDifficulty]}: {botDifficultyDescription}
+                </Text>
+                <Text fontSize="sm" color="var(--ink-soft)">
+                  Connection: {describeConnection(connectionState)}
+                </Text>
+              </VStack>
+            </Stack>
+          ) : mode === "multiplayer" ? (
             <Stack direction={{ base: "column", lg: "row" }} gap={4}>
               <VStack
                 flex={1}
@@ -851,12 +1076,10 @@ function App() {
                   Seats
                 </Text>
                 <Text fontSize="sm" color="var(--ink-soft)">
-                  Vikings: {multiplayerRoom?.seats.vikings.claimed ? "claimed" : "open"}
-                  {multiplayerRoom?.seats.vikings.connected ? " and connected" : ""}
+                  Vikings: {describeSeatStatus(multiplayerRoom, "vikings")}
                 </Text>
                 <Text fontSize="sm" color="var(--ink-soft)">
-                  Marauders: {multiplayerRoom?.seats.marauders.claimed ? "claimed" : "open"}
-                  {multiplayerRoom?.seats.marauders.connected ? " and connected" : ""}
+                  Marauders: {describeSeatStatus(multiplayerRoom, "marauders")}
                 </Text>
                 <Text fontSize="sm" color="var(--ink-soft)">
                   Game start: {multiplayerRoom?.started ? "ready" : "waiting for both players"}
@@ -945,10 +1168,12 @@ function App() {
             boxShadow="0 28px 65px rgba(42, 24, 8, 0.35)"
           >
             <Heading as="h2" fontSize="2xl" fontFamily="'Palatino Linotype', 'Book Antiqua', serif">
-              Multiplayer Lobby
+              {mode === "bot" ? "Bot Lobby" : "Multiplayer Lobby"}
             </Heading>
             <Text color="rgba(243, 232, 203, 0.82)">
-              Create a room to seat Vikings, or open a shared join link to claim the other side.
+              {mode === "bot"
+                ? "Choose a difficulty and start a backend minimax match. You play Vikings and the bot controls Marauders."
+                : "Create a room to seat Vikings, or open a shared join link to claim the other side."}
             </Text>
           </VStack>
         )}
@@ -995,3 +1220,5 @@ function App() {
 }
 
 export default App;
+
+

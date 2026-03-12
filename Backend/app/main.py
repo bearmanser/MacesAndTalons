@@ -1,16 +1,23 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+from .game.bot import BotDifficulty
 from .rooms import (
     ActionRejectedError,
     RoomManager,
     RoomNotFoundError,
     SeatUnavailableError,
 )
+
+
+class CreateBotRoomRequest(BaseModel):
+    difficulty: BotDifficulty = "medium"
+
 
 app = FastAPI(title="Maces & Talons Backend")
 room_manager = RoomManager()
@@ -41,6 +48,12 @@ async def healthcheck() -> dict[str, str]:
 @app.post("/api/rooms")
 async def create_room() -> dict[str, object]:
     room, seat, seat_token = await room_manager.create_room()
+    return {"room": room, "seat": seat, "seatToken": seat_token}
+
+
+@app.post("/api/bot-rooms")
+async def create_bot_room(request: CreateBotRoomRequest) -> dict[str, object]:
+    room, seat, seat_token = await room_manager.create_bot_room(request.difficulty)
     return {"room": room, "seat": seat, "seatToken": seat_token}
 
 
@@ -81,6 +94,9 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
         await websocket.send_json({"type": "auth_ok", "room": room, "seat": seat})
         await room_manager.broadcast_room(room_id, exclude=websocket)
 
+        if await room_manager.maybe_run_bot_turn(room_id):
+            await room_manager.broadcast_room(room_id)
+
         while True:
             message = await websocket.receive_json()
 
@@ -91,6 +107,9 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                 continue
 
             await room_manager.broadcast_room(room_id)
+
+            if await room_manager.maybe_run_bot_turn(room_id):
+                await room_manager.broadcast_room(room_id)
     except ActionRejectedError as exc:
         await websocket.send_json({"type": "error", "message": str(exc)})
         await websocket.close(code=4401)
