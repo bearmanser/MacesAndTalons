@@ -469,7 +469,7 @@ function App() {
       : screen;
 
   const syncRoomSnapshot = (room: RoomSnapshot) => {
-
+    setOptimisticGameState(null);
     setMultiplayerRoom(room);
     setMode((current) =>
       current === "solo" ? current : room.bot ? "bot" : "multiplayer"
@@ -491,6 +491,7 @@ function App() {
 
     setMultiplayerRoom(null);
     setMultiplayerSeat(null);
+    setOptimisticGameState(null);
     setConnectionState("idle");
     setMultiplayerError(null);
     setMultiplayerNotice(null);
@@ -561,6 +562,7 @@ function App() {
 
         setMultiplayerError(message.message);
         setMultiplayerNotice(null);
+        setOptimisticGameState(null);
 
         if (!authenticatedRef.current) {
           reconnectAllowedRef.current = false;
@@ -632,13 +634,12 @@ function App() {
     nextState: GameState,
     message: PendingClientMessage
   ) => {
-    setOptimisticGameState(nextState);
-
     if (!sendMultiplayerMessage(message)) {
-
+      setOptimisticGameState(null);
       return false;
     }
 
+    setOptimisticGameState(nextState);
     setMultiplayerError(null);
     setMultiplayerNotice(null);
     return true;
@@ -695,6 +696,9 @@ function App() {
       clearSeatToken(roomId);
     }
 
+    setOptimisticGameState(null);
+    setMultiplayerRoom(null);
+    setMultiplayerSeat(null);
     setMode("multiplayer");
     setScreen("multiplayerLobby");
 
@@ -728,6 +732,9 @@ function App() {
       clearSeatToken(roomId);
     }
 
+    setOptimisticGameState(null);
+    setMultiplayerRoom(null);
+    setMultiplayerSeat(null);
     setMode("bot");
     setScreen("botSetup");
 
@@ -761,6 +768,7 @@ function App() {
       return;
     }
 
+    setOptimisticGameState(null);
     setMode("multiplayer");
 
     setConnectionState("joining");
