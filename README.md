@@ -13,6 +13,8 @@ This repository contains the full project behind the live game:
 
 In simple terms, the frontend is what players see, and the backend is the server that keeps online matches working.
 
+![Architecture Diagram](MacesAndTalonsArchitecture.png)
+
 ## How The Game Works
 
 Maces & Talons is a two-sided tactical board game played by the Vikings and the Marauders.
