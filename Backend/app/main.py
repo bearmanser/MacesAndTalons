@@ -41,6 +41,7 @@ allowed_origins = read_csv_env(
         "http://localhost:4173",
         "http://127.0.0.1:4173",
         "https://grinderstudio.no",
+        "https://www.grinderstudio.no",
     ],
 )
 allowed_hosts = read_csv_env(
@@ -101,15 +102,21 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
     try:
         auth_message = await websocket.receive_json()
 
-        if auth_message.get("type") != "auth" or not isinstance(auth_message.get("seatToken"), str):
-            await websocket.send_json({"type": "error", "message": "Authenticate with a seat token first."})
+        if auth_message.get("type") != "auth" or not isinstance(
+            auth_message.get("seatToken"), str
+        ):
+            await websocket.send_json(
+                {"type": "error", "message": "Authenticate with a seat token first."}
+            )
             await websocket.close(code=4401)
             return
 
         token_room_id, seat = room_manager.verify_token(auth_message["seatToken"])
 
         if token_room_id != room_id:
-            await websocket.send_json({"type": "error", "message": "That seat token is for a different room."})
+            await websocket.send_json(
+                {"type": "error", "message": "That seat token is for a different room."}
+            )
             await websocket.close(code=4401)
             return
 
@@ -137,7 +144,9 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
         await websocket.send_json({"type": "error", "message": str(exc)})
         await websocket.close(code=4401)
     except RoomNotFoundError:
-        await websocket.send_json({"type": "error", "message": "That room does not exist on this backend."})
+        await websocket.send_json(
+            {"type": "error", "message": "That room does not exist on this backend."}
+        )
         await websocket.close(code=4404)
     except WebSocketDisconnect:
         pass
