@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .game.bot import BotDifficulty
 from .rooms import (
@@ -19,18 +21,39 @@ class CreateBotRoomRequest(BaseModel):
     difficulty: BotDifficulty = "medium"
 
 
+load_dotenv()
+
+
+def read_csv_env(name: str, default: list[str]) -> list[str]:
+    raw_value = os.getenv(name)
+    values = raw_value.split(",") if raw_value is not None else default
+    return [value.strip() for value in values if value.strip()]
+
+
 app = FastAPI(title="Maces & Talons Backend")
 room_manager = RoomManager()
 
-allowed_origins = [
-    origin.strip()
-    for origin in os.getenv(
-        "MACES_TALONS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
-    ).split(",")
-    if origin.strip()
-]
+allowed_origins = read_csv_env(
+    "MACES_TALONS_ALLOWED_ORIGINS",
+    [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "https://grinderstudio.no",
+    ],
+)
+allowed_hosts = read_csv_env(
+    "MACES_TALONS_ALLOWED_HOSTS",
+    [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "maces-and-talons-api.grinderstudio.no",
+    ],
+)
 
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,

@@ -38,9 +38,13 @@ export type ClientMessage =
   | { type: "move_ship"; shipId: string; target: { row: number; col: number } }
   | { type: "use_traitor"; targetHunterId: string };
 
+const defaultApiBaseUrl = import.meta.env.DEV
+  ? "http://127.0.0.1:8000"
+  : "https://maces-and-talons-api.grinderstudio.no";
+
 const apiBaseUrl =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ??
-  "http://127.0.0.1:8000";
+  defaultApiBaseUrl;
 
 const toWsBaseUrl = (baseUrl: string) => {
   if (baseUrl.startsWith("https://")) {
