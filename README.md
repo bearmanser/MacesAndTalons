@@ -1,6 +1,6 @@
-# Maces & Talons
+# Maces and Talons
 
-Maces & Talons is a browser-based strategy board game with a medieval theme, local hotseat play, computer opponents, and online multiplayer rooms.
+Maces and Talons is a browser-based strategy board game with a medieval theme, local hotseat play, computer opponents, and online multiplayer rooms.
 
 Live version: [www.grinderstudio.no/maces-and-talons](https://www.grinderstudio.no/maces-and-talons)
 
@@ -17,7 +17,7 @@ In simple terms, the frontend is what players see, and the backend is the server
 
 ## How The Game Works
 
-Maces & Talons is a two-sided tactical board game played by the Vikings and the Marauders.
+Maces and Talons is a two-sided tactical board game played by the Vikings and the Marauders.
 
 The main ideas are:
 
